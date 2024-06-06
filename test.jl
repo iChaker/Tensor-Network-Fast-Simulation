@@ -36,6 +36,33 @@ function testTEBD(L,ttotal,tau=0.1,nsteps=500,svd_cutoff=1E-16)
 end
 
 
+
+
+function testQdriftSingle(L,ttotal,nsteps=500,cutoff=1E-16)
+    mpsstate=MpsState(L)
+    ham=Hamiltonian("Ising1D",mpsstate.sites)
+    
+    QDRIFTevol=QDRIFTEvolution(mpsstate,ham,ttotal,nsteps;svd_cutoff=cutoff)
+    lambda= sum(ham.parameters["spectral_norm_coefs"]) 
+    qdrift = QDRIFTevol.measurements["Szcenter"]
+    exact=ExactQIsingCenterSz(L,mean(diff(range(0,ttotal,nsteps))),ttotal) #dumb
+    q_X=range(0.0,ttotal,length(qdrift))
+
+    p=plot(q_X,exact,label="exact",xlabel="time",ylabel="Sz center")
+    p=plot!(q_X,qdrift,label="Qdrift "*string(nsteps))
+
+
+    q=plot(q_X,abs.(exact-qdrift),label="Qdrift "*string(nsteps)* "error")
+
+
+
+    return p,q,qdrift,exact,lambda
+
+end
+
+
+
+
 function test(L,ttotal,tau=0.1,nsteps=500,svd_cutoff=1E-16)
     mpsstate=MpsState(L)
     ham=Hamiltonian("Ising1D",mpsstate.sites)
@@ -81,5 +108,3 @@ function test(L,ttotal,tau=0.1,nsteps=500,svd_cutoff=1E-16)
 
 end
 
-        
-p, q, exact, tebd, tebdalt= testTEBD(8,1)

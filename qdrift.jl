@@ -5,36 +5,43 @@ using StatsBase
 include("states.jl")
 
 function spectral_norm_hamiltonian_coefs(hamiltonian)
-    L=length(hamiltonian.Hterms)
-    coefs=[[] for _ in 1:L] # sites x nbodies
-    for (site,Hsite) in enumerate(hamiltonian.Hterms)
-        for Hterm in Hsite
+
+    if haskey(hamiltonian.parameters,"spectral_norm_coefs") 
+        return hamiltonian.parameters["spectral_norm_coefs"]
+    end
+
+    coefs=zeros(Float64,length(hamiltonian.Hterms)) # sites x nbodies
+    for (j,Hterm) in enumerate(hamiltonian.Hterms)
             unprimed_indices = [index for index in inds(Hterm) if plev(index) == 0]
             R=svd(Hterm,unprimed_indices)
-            maxsv=maximum(R.S)
-            push!(coefs[site],maxsv)            
-        end
+            coefs[j]=maximum(R.S)           
     end
+    hamiltonian.parameters["spectral_norm_coefs"]=coefs
     return coefs
 
 end
 
 function gen_unitaries_QDRIFT(hamiltonian,ttotal,nsteps)
 
-    if !haskey(hamiltonian.parameters,"spectral_norm_coefs") 
-        hamiltonian.parameters["spectral_norm_coefs"]=spectral_norm_hamiltonian_coefs(hamiltonian) 
+    if !haskey(hamiltonian.parameters,"unitaries") 
+        D = Dict{Tuple{Float64,Int64}, Vector{ITensor}}()
+        hamiltonian.parameters["unitaries"]=D
+    else 
+        D=hamiltonian.parameters["unitaries"]
     end
-    coefs=hamiltonian.parameters["spectral_norm_coefs"]
+
+    if haskey(D,(ttotal,nsteps)) return D[(ttotal,nsteps)] end
+
+    coefs=spectral_norm_hamiltonian_coefs(hamiltonian) 
     unitaries = deepcopy(hamiltonian.Hterms)
-    lambda = sum(vcat(coefs...))
+    lambda = sum(coefs)
     qtau = lambda * ttotal / nsteps
-    for (site,Hsite) in enumerate(hamiltonian.Hterms)
-        for (nbody,Hterm) in enumerate(Hsite)
-            unitaries[site][nbody]= exp(-im * Hterm * qtau / coefs[site][nbody])
-        end
+    for (j,Hterm) in enumerate(hamiltonian.Hterms)
+            unitaries[j]= exp(-im * Hterm * qtau / coefs[j])
     end
     
-    return vcat(unitaries...),vcat(coefs...)/lambda
+    D[(ttotal,nsteps)]=unitaries
+    return unitaries,coefs/lambda
     
 end
 
