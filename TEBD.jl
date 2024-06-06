@@ -3,21 +3,13 @@ using ProgressMeter
 using JLD2
 
 
+
+
 function gen_unitaries_TEBD_sequential(hamiltonian,tau)
-    sites=hamiltonian.sites
     Hterms=hamiltonian.Hterms
-    L=length(sites)
     gates = ITensor[]
-    
-    for j in 1:(L - 1)
-        Gj = exp(-im * tau / 2 * Hterms[j][2])
-        push!(gates, Gj)
-    end
-    # Include gates in reverse order too
-    # (N,N-1),(N-1,N-2),...
-    # include transverse field
-    for j in 1:L
-        Gj = exp(-im * tau / 2 * Hterms[j][1])
+    for Hj in Hterms
+        Gj = exp(-im * tau / 2 * Hj)
         push!(gates, Gj)
     end
     append!(gates, reverse(gates))
@@ -25,34 +17,33 @@ function gen_unitaries_TEBD_sequential(hamiltonian,tau)
     return gates
 end
 
+
+
 function gen_unitaries_TEBD_alternating(hamiltonian,tau)
     sites=hamiltonian.sites
     Hterms=hamiltonian.Hterms
+    interaction_order=hamiltonian.interaction_order
     L=length(sites)
+    odd=1:interaction_order*2:L
+    even=2:interaction_order*2:L
     gates = ITensor[]
-    for j in 1:2:L-1
-        Gj = exp(-im * tau  * Hterms[j][2])
-        push!(gates, Gj)
+
+    for j in odd
+        for i in 1:interaction_order
+            Gj = exp(-im * tau  * Hterms[j+i-1])
+            push!(gates, Gj)
+
+        end
     end
     
-    for j in 1:2:L
-        Gj = exp(-im * tau  * Hterms[j][1])
-        push!(gates, Gj)
+    for j in even
+        for i in 1:interaction_order
+            Gj = exp(-im * tau  * Hterms[j+i-1])
+            push!(gates, Gj)
+
+        end
     end
 
-
-    for j in 2:2:L-1
-        Gj = exp(-im * tau  * Hterms[j][2])
-        push!(gates, Gj)
-    end
-
-    for j in 2:2:L
-        Gj = exp(-im * tau  * Hterms[j][1])
-        push!(gates, Gj)
-    end
-
-    Gj = exp(-im * tau  * Hterms[end][1])
-    push!(gates, Gj)
     return gates
 
 end
@@ -70,7 +61,9 @@ mutable struct TEBDEvolution
     
     function TEBDEvolution(mpsstate,hamiltonian,ttotal,tau;outfolder="",svd_cutoff=1E-8,algo="alt")
         if algo=="alt" unitaries=gen_unitaries_TEBD_alternating(hamiltonian,tau)
-        elseif algo=="seq" unitaries=gen_unitaries_TEBD_sequential(hamiltonian,tau) end
+        elseif algo=="seq" unitaries=gen_unitaries_TEBD_sequential(hamiltonian,tau) 
+        elseif algo=="seq2" unitaries=gen_unitaries_TEBD_sequential2(hamiltonian,tau) end
+    
 
         measurements= Dict{String, Vector{Any}}()
         @showprogress for t in 0.0:tau:ttotal
@@ -93,12 +86,14 @@ mutable struct TEBDEvolution
             ttau=string(ttotal)*"-"*string(tau)
             if algo=="alt"
                 filename = name*"_"*LhJ*"_TEBDalt_"*ttau
-            elseif algo=="seq" 
+            elseif algo=="seq"
                 filename = name*"_"*LhJ*"_TEBDseq_"*ttau
             end
             
             outfile=outfolder*"/"*filename*".jld2"
             save_object(outfile,measurements)
+        else 
+            outfile=nothing
         end
 
         new(mpsstate,hamiltonian,ttotal,tau,unitaries,measurements,outfile)

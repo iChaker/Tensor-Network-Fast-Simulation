@@ -6,6 +6,36 @@ include("exact.jl")
 using Plots
 
 
+function testTEBD(L,ttotal,tau=0.1,nsteps=500,svd_cutoff=1E-16)
+    mpsstate=MpsState(L)
+    ham=Hamiltonian("Ising1D",mpsstate.sites)
+    TEBDevol=TEBDEvolution(mpsstate,ham,ttotal,tau;outfolder="trash",svd_cutoff=svd_cutoff,algo="seq")
+    # trunc error (0) + trotter error (    )  
+
+
+    mpsstate=MpsState(L)
+    ham=Hamiltonian("Ising1D",mpsstate.sites)
+    TEBDevol_alt=TEBDEvolution(mpsstate,ham,ttotal,tau;outfolder="trash",svd_cutoff=svd_cutoff,algo="alt")
+
+    tebd = TEBDevol.measurements["Szcenter"]
+    tebdalt = TEBDevol_alt.measurements["Szcenter"]
+    exact=ExactQIsingCenterSz(L,tau,ttotal)
+    et_X=range(0.0,ttotal,length(tebd))
+
+
+    p=plot(et_X,exact,label="exact",xlabel="time",ylabel="Sz center")
+    p=plot!(et_X,tebd,label="TEBD sequential")
+    p=plot!(et_X,tebdalt,label="TEBD alternating")
+
+    q=plot(et_X,abs.(exact-tebd),label="TEBD sequential error",xlabel="time",ylabel="Sz center L1 error")
+    q=plot!(et_X,abs.(exact-tebdalt),label="TEBD alternating error ")
+
+
+    return p, q, exact, tebd, tebdalt
+
+end
+
+
 function test(L,ttotal,tau=0.1,nsteps=500,svd_cutoff=1E-16)
     mpsstate=MpsState(L)
     ham=Hamiltonian("Ising1D",mpsstate.sites)
@@ -52,3 +82,4 @@ function test(L,ttotal,tau=0.1,nsteps=500,svd_cutoff=1E-16)
 end
 
         
+p, q, exact, tebd, tebdalt= testTEBD(8,1)
