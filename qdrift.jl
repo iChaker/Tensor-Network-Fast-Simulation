@@ -2,6 +2,8 @@ using LinearAlgebra
 using ITensors
 using Random
 using StatsBase
+using JLD2
+using ProgressMeter
 include("states.jl")
 
 function spectral_norm_hamiltonian_coefs(hamiltonian)
@@ -19,6 +21,20 @@ function spectral_norm_hamiltonian_coefs(hamiltonian)
     hamiltonian.parameters["spectral_norm_coefs"]=coefs
     return coefs
 
+end
+
+
+# Function to save intermediate results to a common file
+function save_intermediate_results(big_array, step, filename)
+    lock(file_lock) do
+        open(filename, "a") do f
+            println(f, "Step $step:")
+            for row in 1:nrows
+                println(f, join(big_array[row, :], ","))
+            end
+            println(f, "")  # Newline for separation
+        end
+    end
 end
 
 function gen_unitaries_QDRIFT(hamiltonian,ttotal,nsteps)
@@ -41,66 +57,93 @@ function gen_unitaries_QDRIFT(hamiltonian,ttotal,nsteps)
     end
     
     D[(ttotal,nsteps)]=unitaries
-    return unitaries,coefs/lambda
+    return unitaries
     
 end
 
 mutable struct QDRIFTEvolution 
-    mpsstate::MpsState
+    psis::Vector{MPS}
     hamiltonian::Hamiltonian
     ttotal::Float32 
     nsteps::Float32 
     unitaries
     measurements
     seed
+    path
     
 
-    function QDRIFTEvolution(mpsstate,hamiltonian,ttotal,nsteps;seed=0,outfolder="",svd_cutoff=1E-8,unitaries="",P="")
-        if isempty(unitaries) 
-            unitaries, P =gen_unitaries_QDRIFT(hamiltonian,ttotal,nsteps)
+    function QDRIFTEvolution(mpsstate,hamiltonian,ttotal,nsteps;seed=0,svd_cutoff=1E-8,ntraj=1,save_percentage=0,saveall=true,outfolder=".")
+       
+        #IO bloat
+        progIO=open("progress.log","a")
+        if save_percentage>0
+            name=string(hamiltonian.name)
+            LhJ=string(length(hamiltonian.sites))*"-"*string(hamiltonian.parameters["h"])*"-"*string(hamiltonian.parameters["J"])
+            qtau=string(ttotal)*"-"*string(nsteps)
+            filename = name*"_"*LhJ*"_QDRIFT-"*string(ntraj)*"_"*qtau*".jld2"
+            path=outfolder*"/"*filename
         end
-        measurements= Dict{String, Vector{Float32}}()
-        for (obs_name, obs_func) in mpsstate.observables
-            measurements[obs_name] = zeros(Float32, nsteps)
+        
+        lastraj=1
+        if saveall
+            measurements = Dict(obs_name => zeros(Float64,ntraj, nsteps) for (obs_name,_) in mpsstate.observables)
+        else
+            measurements = Dict(obs_name => zeros(Float64,ntraj, 1) for (obs_name,_) in mpsstate.observables)
         end
-        if seed > 0 rng=Random.seed!(Random.default_rng(), seed) else rng=Random.default_rng() end
+        psis=Vector{MPS}(undef,ntraj)
+        try @load path measurements lastraj catch e end
+       
+        #generate unitaries 
+        unitaries=gen_unitaries_QDRIFT(hamiltonian,ttotal,nsteps)
+        coefs=hamiltonian.parameters["spectral_norm_coefs"]
+        P=coefs/sum(coefs)
+        
 
-        for step in 1:nsteps
-            gate=StatsBase.sample(rng,unitaries,Weights(P))
-            mpsstate.psi = apply(gate, mpsstate.psi; cutoff=svd_cutoff)        
-            normalize!(mpsstate.psi)
+        lk = Threads.SpinLock()
+        meter = Progress(ntraj-lastraj+1;output=progIO)
 
-            for (obs_name, obs_func) in mpsstate.observables
-                measurements[obs_name][step]=obs_func(mpsstate.psi)
+        #run multiple qdrift evolutions
+        Threads.@threads for traj in lastraj:ntraj
+
+            if seed == 0
+                rng=Random.seed!(Random.default_rng(), traj*nsteps) 
+            else 
+                rng=Random.seed!(Random.default_rng(), seed)
+            end
+            psitraj=deepcopy(mpsstate.psi)
+            for step in 1:nsteps
+                gate=StatsBase.sample(rng,unitaries,Weights(P))
+                psitraj = apply(gate, psitraj; cutoff=svd_cutoff)        
+                normalize!(psitraj)
+
+                if saveall
+                    for (obs_name, obs_func) in mpsstate.observables
+                    measurements[obs_name][traj,step]=obs_func(psitraj)
+                    end
+                elseif step==nsteps
+                    for (obs_name, obs_func) in mpsstate.observables
+                        measurements[obs_name][traj,1]=obs_func(psitraj)
+                    end
+                end
+            end
+            psis[traj]=psitraj
+            ProgressMeter.next!(meter; showvalues = [(:traj,traj)])
+
+            if (save_percentage!=0) && (traj % ceil(save_percentage*ntraj/100) == 0)
+                Threads.lock(lk) do 
+                    lastraj=traj
+                    @save path measurements lastraj
+                end
             end
 
         end
+        lastraj=ntraj
+        @save path measurements lastraj
 
-        if !isempty(outfolder)
-            #oneshot fileoutout todo later
-        end
-        new(mpsstate,hamiltonian,ttotal,nsteps,unitaries,measurements,seed)
+
+        new(psis,hamiltonian,ttotal,nsteps,unitaries,measurements,seed,path)
     end
-
 
 end
 
 
-function QDRIFTEvolutionSamples(L,ttotal,nstepsarray,nsamples;svd_cutoff=1E-8)
-
-    O=[]
-    for nsteps in nstepsarray
-        ham=Hamiltonian("Ising1D",L)
-        unitaries, P =gen_unitaries_QDRIFT(ham,ttotal,nsteps)
-        nsteps_measurement = Vector{Any}(undef,nsamples)
-        Threads.@threads for sampleid in 1:nsamples
-            mpsstate=MpsState(ham.sites)
-            qdriftrun= QDRIFTEvolution(mpsstate,ham,ttotal,nsteps;seed=sampleid*nsteps,unitaries=unitaries,P=P,svd_cutoff=svd_cutoff)
-            nsteps_measurement[sampleid]=qdriftrun.measurements
-        end
-        push!(O,nsteps_measurement)
-    end
-
-    return O
-
-end

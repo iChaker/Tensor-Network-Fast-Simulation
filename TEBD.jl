@@ -57,9 +57,9 @@ mutable struct TEBDEvolution
     tau::Float32 
     unitaries 
     measurements
-    outfile
+    path
     
-    function TEBDEvolution(mpsstate,hamiltonian,ttotal,tau;outfolder="",svd_cutoff=1E-8,algo="alt")
+    function TEBDEvolution(mpsstate,hamiltonian,ttotal,tau;outfolder=nothing,svd_cutoff=1E-8,algo="alt")
         if algo=="alt" unitaries=gen_unitaries_TEBD_alternating(hamiltonian,tau)
         elseif algo=="seq" unitaries=gen_unitaries_TEBD_sequential(hamiltonian,tau) 
         elseif algo=="seq2" unitaries=gen_unitaries_TEBD_sequential2(hamiltonian,tau) end
@@ -79,24 +79,24 @@ mutable struct TEBDEvolution
             end
         end
 
-        if !isempty(outfolder)
+        if !isnothing(outfolder)
             #format: Hname_L-h-J_TEBD_ttotal-tau
             name=string(hamiltonian.name)
             LhJ=string(length(hamiltonian.sites))*"-"*string(hamiltonian.parameters["h"])*"-"*string(hamiltonian.parameters["J"])
             ttau=string(ttotal)*"-"*string(tau)
             if algo=="alt"
-                filename = name*"_"*LhJ*"_TEBDalt_"*ttau
+                filename = name*"_"*LhJ*"_TEBDalt_"*ttau*".jld2"
             elseif algo=="seq"
-                filename = name*"_"*LhJ*"_TEBDseq_"*ttau
+                filename = name*"_"*LhJ*"_TEBDseq_"*ttau*".jld2"
             end
             
-            outfile=outfolder*"/"*filename*".jld2"
-            save_object(outfile,measurements)
+            path=outfolder*"/"*filename
+            save_object(path,measurements)
         else 
-            outfile=nothing
+            path=nothing
         end
 
-        new(mpsstate,hamiltonian,ttotal,tau,unitaries,measurements,outfile)
+        new(mpsstate,hamiltonian,ttotal,tau,unitaries,measurements,path)
     end
 
 end

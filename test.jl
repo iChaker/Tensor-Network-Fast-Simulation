@@ -36,9 +36,7 @@ function testTEBD(L,ttotal,tau=0.1,nsteps=500,svd_cutoff=1E-16)
 end
 
 
-
-
-function testQdriftSingle(L,ttotal,nsteps=500,cutoff=1E-16)
+function testQdriftsingle(L,ttotal,nsteps=500,cutoff=1E-16)
     mpsstate=MpsState(L)
     ham=Hamiltonian("Ising1D",mpsstate.sites)
     
@@ -49,18 +47,38 @@ function testQdriftSingle(L,ttotal,nsteps=500,cutoff=1E-16)
     q_X=range(0.0,ttotal,length(qdrift))
 
     p=plot(q_X,exact,label="exact",xlabel="time",ylabel="Sz center")
-    p=plot!(q_X,qdrift,label="Qdrift "*string(nsteps))
+    p=plot!(q_X,transpose(qdrift),label="Qdrift "*string(nsteps))
 
 
-    q=plot(q_X,abs.(exact-qdrift),label="Qdrift "*string(nsteps)* "error")
-
-
+    q=plot(q_X,abs.(exact-transpose(qdrift)),label="Qdrift "*string(nsteps)* " error")
 
     return p,q,qdrift,exact,lambda
 
 end
 
 
+function testQdriftmulti(L,ttotal,nsteps=300,cutoff=1E-8,ntraj=50,save_percentage=10,outfolder="trash",saveall=true)
+    mpsstate=MpsState(L)
+    ham=Hamiltonian("Ising1D",mpsstate.sites)
+    
+    QDRIFTevol=QDRIFTEvolution(mpsstate,ham,ttotal,nsteps;svd_cutoff=cutoff,ntraj=ntraj,saveall=saveall,save_percentage=save_percentage,outfolder=outfolder)
+    qdrift = QDRIFTevol.measurements["Szcenter"]
+    exact=ExactQIsingCenterSz(L,mean(diff(range(0,ttotal,nsteps))),ttotal) #dumb
+
+    MEAN=mean(qdrift,dims=1)'
+    STD=std(qdrift,dims=1)'
+    display(qdrift)
+    q_X=range(0.0,ttotal,length(MEAN))
+
+    p=plot(q_X,exact,label="exact",xlabel="time",ylabel="Sz center")
+    plot!(q_X,MEAN,grid=false,ribbon=STD,fillalpha=.5,label="Qdrift "*string(nsteps))
+
+
+    q=plot(q_X,abs.(exact-MEAN),grid=false,ribbon=STD,fillalpha=.5,label="Qdrift "*string(nsteps)* "error")
+
+    return p,q,exact,QDRIFTevol
+
+end
 
 
 function test(L,ttotal,tau=0.1,nsteps=500,svd_cutoff=1E-16)
@@ -107,4 +125,3 @@ function test(L,ttotal,tau=0.1,nsteps=500,svd_cutoff=1E-16)
     return p, q, estq, exact1, tebd, exact2, qdrift 
 
 end
-
